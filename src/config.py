@@ -15,16 +15,16 @@ class Settings(BaseSettings):
     Pydantic validates types and raises clear errors if something is missing.
     """
 
-    # ── Groq AI ────────────────────────────────────────────────────────────────
-    groq_api_key: str = Field(..., description="Groq API key from console.groq.com")
-    groq_main_model: str = Field(
-        default="llama-3.3-70b-versatile",
-        description="Model used for main user conversations",
-    )
-    groq_summarizer_model: str = Field(
-        default="llama-3.1-8b-instant",
-        description="Fast model used for cheap internal summarization",
-    )
+    # ── Universal AI Providers ──────────────────────────────────────────────────
+    primary_provider_url: str = Field(..., description="Base URL for primary provider")
+    primary_api_key: str = Field(..., description="API key for primary provider")
+    primary_main_model: str = Field(..., description="Model used for main user conversations")
+    primary_summarizer_model: str = Field(..., description="Fast model used for cheap internal summarization")
+
+    fallback_provider_url: str = Field(..., description="Base URL for fallback provider")
+    fallback_api_key: str = Field(..., description="API key for fallback provider")
+    fallback_main_model: str = Field(..., description="Model used for main user conversations (Fallback)")
+    fallback_summarizer_model: str = Field(..., description="Fast model used for cheap internal summarization (Fallback)")
 
     # ── Routing ────────────────────────────────────────────────────────────────
     enable_intent_routing: bool = Field(

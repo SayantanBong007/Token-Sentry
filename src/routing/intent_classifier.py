@@ -11,12 +11,15 @@ WHY THIS EXISTS:
 """
 
 import logging
-from groq import AsyncGroq
+from openai import AsyncOpenAI
 from src.config import settings
 
 logger = logging.getLogger(__name__)
 
-_client = AsyncGroq(api_key=settings.groq_api_key)
+_client = AsyncOpenAI(
+    base_url=settings.primary_provider_url,
+    api_key=settings.primary_api_key
+)
 
 INTENT_PROMPT = """You are an intent router for an AI assistant.
 Your job is to look at the user's latest request and classify it as either SIMPLE or COMPLEX.
@@ -68,7 +71,7 @@ async def classify_intent(messages: list[dict]) -> str:
 
     try:
         response = await _client.chat.completions.create(
-            model=settings.groq_summarizer_model,
+            model=settings.primary_summarizer_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
             max_tokens=10,

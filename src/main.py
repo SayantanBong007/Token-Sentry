@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 
 from src.config import settings
 from src.proxy.router import router as proxy_router
+from src.metrics.tracker import get_all_metrics
 
 
 # ── Logging Setup ──────────────────────────────────────────────────────────────
@@ -81,9 +82,9 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
     logger.info("🛡️  Token-Sentry starting up")
     logger.info(f"   Environment  : {settings.env}")
-    logger.info(f"   Backend      : Groq")
-    logger.info(f"   Main model   : {settings.groq_main_model}")
-    logger.info(f"   Summarizer   : {settings.groq_summarizer_model}")
+    logger.info(f"   Backend      : Universal Providers")
+    logger.info(f"   Primary      : {settings.primary_main_model} @ {settings.primary_provider_url}")
+    logger.info(f"   Fallback     : {settings.fallback_main_model} @ {settings.fallback_provider_url}")
     logger.info(f"   High watermark: {settings.token_high_watermark} tokens")
     logger.info(f"   Hot buffer   : {settings.hot_buffer_turns} turns")
     logger.info(f"   Listening on : http://0.0.0.0:{settings.port}")
@@ -141,16 +142,17 @@ async def health_check():
 async def root():
     """Root endpoint — basic info for anyone who navigates to the URL."""
     return JSONResponse({
-        "service": "Token-Sentry Proxy Gateway",
-        "backend": "Groq (Llama / Mixtral)",
+        "service": "Token-Sentry Proxy Gateway (V2)",
+        "backend": "Universal Providers",
         "docs": "/docs",
         "health": "/health",
+        "metrics": "/api/metrics",
         "endpoint": "/v1/chat/completions",
         "compatible_with": "OpenAI Chat Completions API",
-        "models": [
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-            "mixtral-8x7b-32768",
-            "gemma2-9b-it",
-        ],
     })
+
+@app.get("/api/metrics")
+async def metrics():
+    """Returns real-time analytics data."""
+    data = await get_all_metrics()
+    return JSONResponse(data)

@@ -42,6 +42,21 @@ def _get_collection(session_id: str):
         logger.error(f"Error getting collection for {session_id}: {e}")
         return None
 
+def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
+    """Splits a long text into smaller overlapping chunks for better retrieval."""
+    if len(text) <= chunk_size:
+        return [text]
+    
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        chunks.append(text[start:end])
+        if end >= len(text):
+            break
+        start += (chunk_size - overlap)
+    return chunks
+
 async def save_to_cold_memory(session_id: str, messages: list[dict]):
     """
     Saves a list of raw messages into the vector database.
@@ -60,10 +75,13 @@ async def save_to_cold_memory(session_id: str, messages: list[dict]):
         if not msg.get("content") or msg.get("role") not in ["user", "assistant"]:
             continue
             
-        doc = f"{msg['role'].upper()}: {msg['content']}"
-        documents.append(doc)
-        metadatas.append({"role": msg['role']})
-        ids.append(uuid.uuid4().hex)
+        content_chunks = chunk_text(msg['content'])
+        
+        for i, chunk in enumerate(content_chunks):
+            doc = f"{msg['role'].upper()}: {chunk}"
+            documents.append(doc)
+            metadatas.append({"role": msg['role'], "chunk": i})
+            ids.append(uuid.uuid4().hex)
 
     if not documents:
         return
@@ -82,7 +100,7 @@ async def save_to_cold_memory(session_id: str, messages: list[dict]):
         logger.error(f"Failed to save cold memory: {e}")
 
 
-async def recall_from_cold_memory(session_id: str, query: str, k: int = 3) -> str:
+async def recall_from_cold_memory(session_id: str, query: str, k: int = 5) -> str:
     """
     Searches the vector database for the top K messages relevant to the query.
     Returns a formatted string of those memories, or empty string if none.

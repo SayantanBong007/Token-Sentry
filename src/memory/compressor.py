@@ -25,15 +25,19 @@ WHY THIS EXISTS:
 """
 
 import logging
-from groq import Groq
+from openai import AsyncOpenAI
 from src.config import settings
 from src.token_engine.counter import count_tokens_in_messages
 from src.memory.vector_store import save_to_cold_memory
+from src.metrics.tracker import increment_metric
 
 logger = logging.getLogger(__name__)
 
-# Single Groq client for the summarizer (can be same or different from main)
-_summarizer_client = Groq(api_key=settings.groq_api_key)
+# Single client for the summarizer
+_summarizer_client = AsyncOpenAI(
+    base_url=settings.primary_provider_url,
+    api_key=settings.primary_api_key
+)
 
 # The prompt that instructs Llama to summarize the conversation
 COMPRESSION_PROMPT = """You are a conversation memory compressor.
@@ -104,6 +108,10 @@ async def compress_history(session_id: str, messages: list[dict]) -> list[dict]:
     compressed = [summary_card] + hot_messages
 
     new_token_count = count_tokens_in_messages(compressed)
+    tokens_saved = (cold_token_count + hot_token_count) - new_token_count
+    
+    if tokens_saved > 0:
+        await increment_metric("tokens_saved", tokens_saved)
 
     logger.info(
         "Compression complete",
@@ -140,8 +148,8 @@ async def _summarize(messages: list[dict]) -> str:
     prompt = COMPRESSION_PROMPT.replace("{n}", str(len(messages)))
 
     try:
-        response = _summarizer_client.chat.completions.create(
-            model=settings.groq_summarizer_model,   # llama-3.1-8b-instant (fast + cheap)
+        response = await _summarizer_client.chat.completions.create(
+            model=settings.primary_summarizer_model,   # fast + cheap model
             messages=[
                 {
                     "role": "user",

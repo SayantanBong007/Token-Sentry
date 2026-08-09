@@ -48,13 +48,14 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from src.proxy.transformer import resolve_model, build_openai_response
-from src.proxy.streaming import stream_groq_response, call_groq_blocking
+from src.proxy.streaming import stream_provider_response, call_provider_blocking
 from src.token_engine.counter import count_tokens_in_messages
 from src.token_engine.watermark import check_watermark, WatermarkStatus
 from src.memory.session_store import load_session, save_session
 from src.memory.compressor import compress_history
 from src.memory.vector_store import recall_from_cold_memory
 from src.routing.intent_classifier import classify_intent
+from src.metrics.tracker import increment_metric
 from src.config import settings
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,8 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
 
     # In passthrough mode, generate a temporary trace ID just for logging
     trace_id = session_id or f"pass-{uuid.uuid4().hex[:8]}"
+
+    await increment_metric("requests_served")
 
     logger.info(
         "Incoming request",
@@ -194,20 +197,21 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     if settings.enable_intent_routing:
         intent = await classify_intent(working_messages)
         if intent == "SIMPLE":
+            await increment_metric("simple_intents_routed")
             logger.info(
                 "Routing simple query to cheap model",
                 extra={"session_id": trace_id, "original_model": body.model}
             )
-            body.model = settings.groq_summarizer_model
+            body.model = settings.primary_summarizer_model
 
     # ── Resolve model name ────────────────────────────────────────────────────
     resolved_model = resolve_model(body.model)
 
-    # ── Forward to Groq ───────────────────────────────────────────────────────
+    # ── Forward to Provider ───────────────────────────────────────────────────
     if body.stream and not is_stateful:
         # PASSTHROUGH + STREAMING: full streaming, no state management needed
         return StreamingResponse(
-            stream_groq_response(
+            stream_provider_response(
                 messages=working_messages,
                 model_name=resolved_model,
                 session_id=trace_id,
@@ -230,7 +234,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
         # STATEFUL or BLOCKING: use blocking call so we can capture + save the response
         # Note: stateful streaming is always blocking internally to ensure we can
         # persist the assistant's reply to Redis before the session is lost.
-        response_text, output_tokens = await call_groq_blocking(
+        response_text, output_tokens = await call_provider_blocking(
             messages=working_messages,
             model_name=resolved_model,
             session_id=trace_id,
