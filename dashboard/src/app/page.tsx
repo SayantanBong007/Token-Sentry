@@ -19,15 +19,18 @@ interface Metrics {
   complex_intents_routed?: number;
   compression_runs?: number;
   routing_efficiency_pct?: number;
+  tokens_groq?: number;
+  tokens_nim?: number;
+  avg_latency_ms?: number;
   activity_log?: ActivityEvent[];
 }
 
 const EVENT_META: Record<string, { label: string; icon: string; color: string }> = {
-  tokens_saved:          { label: "Tokens Saved",        icon: "🗜️",  color: "#22d3a0" },
-  requests_served:       { label: "Request Served",       icon: "📡",  color: "#60a5fa" },
-  fallback_events:       { label: "Provider Fallback",    icon: "⚡",  color: "#fbbf24" },
-  simple_intents_routed: { label: "Routed to Fast Model", icon: "🏎️", color: "#22d3a0" },
-  compression_runs:      { label: "Compression Run",      icon: "🔧",  color: "#a78bfa" },
+  tokens_saved:          { label: "Tokens Compressed",    icon: "🗜️",  color: "var(--primary)" },
+  requests_served:       { label: "Request Served",       icon: "📡",  color: "var(--secondary)" },
+  fallback_events:       { label: "Provider Fallback",    icon: "⚡",  color: "var(--warning)" },
+  simple_intents_routed: { label: "Routed to Fast Model", icon: "🏎️", color: "var(--primary)" },
+  compression_runs:      { label: "Compression Run",      icon: "🧠",  color: "var(--accent)" },
 };
 
 function timeAgo(ts: number): string {
@@ -38,37 +41,10 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-function RingChart({ pct }: { pct: number }) {
-  const r = 45;
-  const circ = 2 * Math.PI * r;
-  const offset = circ - (pct / 100) * circ;
-  return (
-    <div className="ring-container">
-      <svg viewBox="0 0 100 100" width="110" height="110">
-        <defs>
-          <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#22d3a0" />
-            <stop offset="100%" stopColor="#60a5fa" />
-          </linearGradient>
-        </defs>
-        <circle className="ring-bg"   cx="50" cy="50" r={r} />
-        <circle className="ring-fill" cx="50" cy="50" r={r}
-          strokeDasharray={circ}
-          strokeDashoffset={offset}
-        />
-      </svg>
-      <div className="ring-label">
-        <span className="ring-pct">{pct}%</span>
-        <span className="ring-sub">efficient</span>
-      </div>
-    </div>
-  );
-}
-
 export default function Dashboard() {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [online, setOnline] = useState<boolean | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [, setNow] = useState(Date.now());
 
   useEffect(() => {
     const fetchMetrics = async () => {
@@ -97,7 +73,9 @@ export default function Dashboard() {
   const tokensSaved   = m.tokens_saved ?? 0;
   const costSaved     = m.cost_saved_usd ?? 0;
   const compressions  = m.compression_runs ?? 0;
-  const efficiency    = m.routing_efficiency_pct ?? 0;
+  const tokensGroq    = m.tokens_groq ?? 0;
+  const tokensNim     = m.tokens_nim ?? 0;
+  const avgLatency    = m.avg_latency_ms ?? 0;
   const activity      = m.activity_log ?? [];
 
   return (
@@ -106,184 +84,229 @@ export default function Dashboard() {
       <header className="header">
         <div className="header-left">
           <h1>🛡️ Token-Sentry Dashboard</h1>
-          <p>Real-time Analytics & Gateway Intelligence</p>
+          <p>Real-time AI Proxy Analytics & Intelligence</p>
         </div>
-        <div className="status-badge">
-          <div className={`status-dot${online === false ? " offline" : ""}`} />
-          {online === null ? "Connecting..." : online ? "Gateway Online" : "Gateway Offline"}
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <div className={`status-badge ${online === false ? "offline" : ""}`}>
+            <div className={`status-dot ${online === false ? "offline" : ""}`} />
+            {online === null ? "Connecting..." : online ? "Gateway Online" : "Gateway Offline"}
+          </div>
+          <Link href="/docs" style={{ color: "var(--text-muted)", textDecoration: "none" }}>Docs ↗</Link>
         </div>
-        <Link href="/docs" style={{ fontSize: "0.85rem", color: "var(--text-muted)", textDecoration: "none", padding: "0.4rem 1rem", border: "1px solid var(--border)", borderRadius: "999px", transition: "color 0.2s" }}>Docs ↗</Link>
       </header>
 
-      {/* ── KPI Cards ── */}
+      {/* ── Architecture Visualizer ── */}
+      <div className="viz-panel">
+        <div className="viz-title">🔍 Live Request Pipeline</div>
+        <div className="flow-container">
+          <div className="flow-node">
+            <span className="node-icon">💻</span>
+            <div className="node-title">Client App</div>
+            <div className="node-desc">AI Agents (ArchFox)</div>
+          </div>
+          
+          <div className="flow-arrow">→</div>
+          
+          <div className="flow-node" style={{ borderColor: 'var(--primary)', boxShadow: '0 0 15px var(--primary-glow)' }}>
+            <span className="node-icon">🛡️</span>
+            <div className="node-title">Token-Sentry</div>
+            <div className="node-desc">Map-Reduce & Routing</div>
+          </div>
+          
+          <div className="flow-arrow">→</div>
+          
+          <div className="flow-node">
+            <span className="node-icon">☁️</span>
+            <div className="node-title">Provider API</div>
+            <div className="node-desc">Groq / NIM</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── KPI Grid ── */}
       <div className="kpi-grid">
-        <div className="kpi-card" style={{ "--accent": "#22d3a0" } as React.CSSProperties}>
-          <span className="kpi-icon">🗜️</span>
-          <div className="kpi-label">Tokens Saved</div>
+        <div className="kpi-card" style={{ "--color": "var(--primary)", "--color-glow": "var(--primary-glow)" } as React.CSSProperties}>
+          <div className="kpi-header">
+            <div className="kpi-icon" style={{ color: "var(--primary)" }}>🗜️</div>
+            <div className="kpi-label">Tokens Saved</div>
+          </div>
           <div className="kpi-value">{tokensSaved.toLocaleString()}</div>
-          <div className="kpi-sub">via context compression</div>
+          <div className="kpi-desc">Number of context tokens avoided by summarizing huge histories & payloads.</div>
         </div>
 
-        <div className="kpi-card" style={{ "--accent": "#22d3a0" } as React.CSSProperties}>
-          <span className="kpi-icon">💰</span>
-          <div className="kpi-label">Cost Saved</div>
+        <div className="kpi-card" style={{ "--color": "var(--primary)", "--color-glow": "var(--primary-glow)" } as React.CSSProperties}>
+          <div className="kpi-header">
+            <div className="kpi-icon" style={{ color: "var(--primary)" }}>💰</div>
+            <div className="kpi-label">Cost Saved</div>
+          </div>
           <div className="kpi-value">${costSaved.toFixed(4)}</div>
-          <div className="kpi-sub">≈ $0.79 per 1M tokens</div>
+          <div className="kpi-desc">Calculated at a rate of roughly $0.79 per 1M tokens saved from the main model.</div>
         </div>
 
-        <div className="kpi-card" style={{ "--accent": "#60a5fa" } as React.CSSProperties}>
-          <span className="kpi-icon">📡</span>
-          <div className="kpi-label">Requests Served</div>
-          <div className="kpi-value">{requests.toLocaleString()}</div>
-          <div className="kpi-sub">total API interactions</div>
-        </div>
-
-        <div className="kpi-card" style={{ "--accent": "#a78bfa" } as React.CSSProperties}>
-          <span className="kpi-icon">🔧</span>
-          <div className="kpi-label">Compression Runs</div>
+        <div className="kpi-card" style={{ "--color": "var(--accent)", "--color-glow": "var(--accent-glow)" } as React.CSSProperties}>
+          <div className="kpi-header">
+            <div className="kpi-icon" style={{ color: "var(--accent)" }}>🧠</div>
+            <div className="kpi-label">Compression Runs</div>
+          </div>
           <div className="kpi-value">{compressions.toLocaleString()}</div>
-          <div className="kpi-sub">history compacted</div>
+          <div className="kpi-desc">Times Token-Sentry actively map-reduced or summarized context.</div>
         </div>
 
-        <div className="kpi-card" style={{ "--accent": fallbacks > 0 ? "#fbbf24" : "#64748b" } as React.CSSProperties}>
-          <span className="kpi-icon">⚡</span>
-          <div className="kpi-label">Provider Fallbacks</div>
-          <div className="kpi-value">{fallbacks.toLocaleString()}</div>
-          <div className="kpi-sub">seamless failovers</div>
+        <div className="kpi-card" style={{ "--color": "var(--secondary)", "--color-glow": "var(--secondary-glow)" } as React.CSSProperties}>
+          <div className="kpi-header">
+            <div className="kpi-icon" style={{ color: "var(--secondary)" }}>⏱️</div>
+            <div className="kpi-label">Average Latency</div>
+          </div>
+          <div className="kpi-value">{avgLatency > 0 ? `${avgLatency}ms` : "-"}</div>
+          <div className="kpi-desc">Total average latency across all routed model requests.</div>
+        </div>
+
+        <div className="kpi-card" style={{ "--color": "var(--accent)", "--color-glow": "var(--accent-glow)" } as React.CSSProperties}>
+          <div className="kpi-header">
+            <div className="kpi-icon" style={{ color: "var(--accent)" }}>📡</div>
+            <div className="kpi-label">Total Requests</div>
+          </div>
+          <div className="kpi-value">{requests.toLocaleString()}</div>
+          <div className="kpi-desc">Total number of API interactions handled by the Sentry gateway.</div>
         </div>
       </div>
 
       {/* ── Two-column row ── */}
       <div className="two-col">
-        {/* Intent Routing Breakdown */}
+        {/* Intent & Routing */}
         <div className="panel">
-          <div className="panel-title">🧠 Intent Routing Breakdown</div>
-          <div className="routing-chart">
+          <div className="panel-title">🏎️ Traffic Routing & Fallbacks</div>
+          <div className="bar-row">
+            <div className="bar-meta">
+              <span className="bar-label">Routed to Cheap Model (Simple Intents)</span>
+              <span className="bar-count">{simple}</span>
+            </div>
+            <div className="bar-track">
+              <div className="bar-fill green" style={{ width: requests ? `${(simple / requests) * 100}%` : "0%" }} />
+            </div>
+          </div>
+
+          <div className="bar-row">
+            <div className="bar-meta">
+              <span className="bar-label">Routed to Main Model (Complex Intents)</span>
+              <span className="bar-count">{complex}</span>
+            </div>
+            <div className="bar-track">
+              <div className="bar-fill blue" style={{ width: requests ? `${(complex / requests) * 100}%` : "0%" }} />
+            </div>
+          </div>
+
+          <div className="bar-row">
+            <div className="bar-meta">
+              <span className="bar-label">Rate-Limit Fallbacks (NVIDIA NIM)</span>
+              <span className="bar-count" style={{ color: "var(--warning)" }}>{fallbacks}</span>
+            </div>
+            <div className="bar-track">
+              <div className="bar-fill amber" style={{ width: requests ? `${Math.min((fallbacks / requests) * 100, 100)}%` : "0%" }} />
+            </div>
+          </div>
+          
+          <div style={{ marginTop: "2rem", borderTop: "1px dashed var(--border)", paddingTop: "1.5rem" }}>
+            <div className="panel-title">📊 Token Distribution by Provider</div>
             <div className="bar-row">
               <div className="bar-meta">
-                <span className="bar-label">Simple → Fast Model</span>
-                <span className="bar-count">{simple} reqs</span>
+                <span className="bar-label">Groq Llama 3.1 8B</span>
+                <span className="bar-count">{tokensGroq.toLocaleString()} tokens</span>
               </div>
               <div className="bar-track">
-                <div className="bar-fill green" style={{ width: requests ? `${(simple / requests) * 100}%` : "0%" }} />
+                <div className="bar-fill green" style={{ width: (tokensGroq + tokensNim) ? `${(tokensGroq / (tokensGroq + tokensNim)) * 100}%` : "0%" }} />
               </div>
             </div>
-
+            
             <div className="bar-row">
               <div className="bar-meta">
-                <span className="bar-label">Complex → Main Model</span>
-                <span className="bar-count">{complex} reqs</span>
+                <span className="bar-label">NVIDIA NIM (Fallback)</span>
+                <span className="bar-count" style={{ color: "var(--warning)" }}>{tokensNim.toLocaleString()} tokens</span>
               </div>
               <div className="bar-track">
-                <div className="bar-fill blue" style={{ width: requests ? `${(complex / requests) * 100}%` : "0%" }} />
-              </div>
-            </div>
-
-            <div className="bar-row">
-              <div className="bar-meta">
-                <span className="bar-label">Fallback Triggered</span>
-                <span className="bar-count">{fallbacks} reqs</span>
-              </div>
-              <div className="bar-track">
-                <div className="bar-fill amber" style={{ width: requests ? `${Math.min((fallbacks / requests) * 100, 100)}%` : "0%" }} />
-              </div>
-            </div>
-
-            <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border)", paddingTop: "1rem" }}>
-              <div className="efficiency-wrapper">
-                <RingChart pct={efficiency} />
-                <div className="ring-stats">
-                  <div className="ring-stat-row">
-                    <span className="ring-stat-label">Simple routed</span>
-                    <span className="ring-stat-val" style={{ color: "#22d3a0" }}>{simple}</span>
-                  </div>
-                  <div className="ring-stat-row">
-                    <span className="ring-stat-label">Complex routed</span>
-                    <span className="ring-stat-val" style={{ color: "#60a5fa" }}>{complex}</span>
-                  </div>
-                  <div className="ring-stat-row">
-                    <span className="ring-stat-label">Total requests</span>
-                    <span className="ring-stat-val" style={{ color: "var(--text)" }}>{requests}</span>
-                  </div>
-                </div>
+                <div className="bar-fill amber" style={{ width: (tokensGroq + tokensNim) ? `${(tokensNim / (tokensGroq + tokensNim)) * 100}%` : "0%" }} />
               </div>
             </div>
           </div>
-        </div>
-
-        {/* Provider Health */}
-        <div className="panel">
-          <div className="panel-title">🔌 Provider Health</div>
-          <div className="provider-list">
+          
+          <div style={{ marginTop: "2rem", borderTop: "1px dashed var(--border)", paddingTop: "1.5rem" }}>
+            <div className="panel-title">🔌 Active Providers</div>
             <div className="provider-row">
               <div className="provider-info">
-                <div className="provider-dot primary" />
+                <div className="status-dot" style={{ background: "var(--primary)", boxShadow: "0 0 10px var(--primary)" }} />
                 <div>
-                  <div className="provider-name">Groq (Primary)</div>
+                  <div className="provider-name">Groq Llama 3.1 8B</div>
                   <div className="provider-url">api.groq.com/openai/v1</div>
                 </div>
               </div>
-              <span className="provider-badge active">ACTIVE</span>
+              <span className="provider-badge active">PRIMARY</span>
             </div>
-
             <div className="provider-row">
               <div className="provider-info">
-                <div className="provider-dot fallback" />
+                <div className="status-dot" style={{ background: "var(--warning)", boxShadow: "0 0 10px var(--warning)", animation: "none" }} />
                 <div>
-                  <div className="provider-name">NVIDIA NIM (Fallback)</div>
+                  <div className="provider-name">NVIDIA NIM Llama 3.1 8B</div>
                   <div className="provider-url">integrate.api.nvidia.com/v1</div>
                 </div>
               </div>
               <span className={`provider-badge ${fallbacks > 0 ? "triggered" : "standby"}`}>
-                {fallbacks > 0 ? `${fallbacks}× USED` : "STANDBY"}
+                {fallbacks > 0 ? `${fallbacks}x TRIGGERED` : "STANDBY"}
               </span>
             </div>
           </div>
+        </div>
 
-          {/* System Config */}
-          <div className="panel-title" style={{ marginTop: "1.5rem" }}>⚙️ System Config</div>
-          <div className="config-list">
-            {[
-              { key: "Token Watermark",   val: "4,000 tokens" },
-              { key: "Hot Buffer",        val: "3 turns" },
-              { key: "SDK Retries",       val: "0 (instant failover)" },
-              { key: "Vector Chunks",     val: "500 chars / 50 overlap" },
-              { key: "Memory Recall",     val: "Top 5 chunks" },
-              { key: "Polling Interval",  val: "3s" },
-            ].map(({ key, val }) => (
-              <div key={key} className="config-row">
-                <span className="config-key">{key}</span>
-                <span className="config-value">{val}</span>
+        {/* Activity & Config */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+          <div className="panel" style={{ flex: 1 }}>
+            <div className="panel-title">📋 Live Activity Log</div>
+            {activity.length === 0 ? (
+              <div className="no-data">No activity yet. Start sending requests to Token-Sentry!</div>
+            ) : (
+              <div className="activity-list">
+                {activity.map((evt, i) => {
+                  const meta = EVENT_META[evt.event] ?? { label: evt.event, icon: "•", color: "var(--text-muted)" };
+                  return (
+                    <div className="activity-item" key={i}>
+                      <div className="activity-icon-box" style={{ color: meta.color, borderColor: meta.color }}>
+                        {meta.icon}
+                      </div>
+                      <div className="activity-body">
+                        <div className="activity-title" style={{ color: meta.color }}>{meta.label}</div>
+                        <div className="activity-time">{timeAgo(evt.ts)}</div>
+                      </div>
+                      {evt.amount > 0 && (
+                        <div className="activity-val" style={{ color: meta.color }}>+{evt.amount.toLocaleString()}</div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            ))}
+            )}
+          </div>
+          
+          <div className="panel">
+            <div className="panel-title">⚙️ Gateway Config</div>
+            <div className="config-grid">
+              <div className="config-item">
+                <div className="config-label">Compression Trigger</div>
+                <div className="config-val">4,000 Tokens</div>
+              </div>
+              <div className="config-item">
+                <div className="config-label">Map-Reduce Chunk</div>
+                <div className="config-val">12,000 Chars</div>
+              </div>
+              <div className="config-item">
+                <div className="config-label">Hot Buffer</div>
+                <div className="config-val">Last 3 Turns</div>
+              </div>
+              <div className="config-item">
+                <div className="config-label">Failover Mode</div>
+                <div className="config-val">Instant / 0 Retry</div>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-
-      {/* ── Full-width Activity Log ── */}
-      <div className="panel">
-        <div className="panel-title">📋 Live Activity Feed</div>
-        {activity.length === 0 ? (
-          <div className="no-activity">No activity yet — fire a request to see events appear here in real-time!</div>
-        ) : (
-          <div className="activity-list">
-            {activity.map((evt, i) => {
-              const meta = EVENT_META[evt.event] ?? { label: evt.event, icon: "•", color: "var(--text-muted)" };
-              return (
-                <div className="activity-item" key={i}>
-                  <span className="activity-icon">{meta.icon}</span>
-                  <div className="activity-body">
-                    <div className="activity-event" style={{ color: meta.color }}>{meta.label}</div>
-                    <div className="activity-time">{timeAgo(evt.ts)}</div>
-                  </div>
-                  {evt.amount > 1 && (
-                    <span className="activity-amount" style={{ color: meta.color }}>+{evt.amount.toLocaleString()}</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
     </div>
   );

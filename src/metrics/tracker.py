@@ -17,13 +17,24 @@ async def increment_metric(key: str, amount: int = 1):
         pipe = _redis_client.pipeline()
         pipe.incrby(f"metrics:{key}", amount)
         # Keep a rolling log of recent activity (last 20 events)
-        event = f"{int(time.time())}:{key}:{amount}"
-        pipe.lpush("metrics:activity_log", event)
-        pipe.ltrim("metrics:activity_log", 0, 19)
+        # We don't want latency or pure token additions to spam the activity log
+        if not key.startswith("latency") and not key.startswith("tokens_"):
+            event = f"{int(time.time())}:{key}:{amount}"
+            pipe.lpush("metrics:activity_log", event)
+            pipe.ltrim("metrics:activity_log", 0, 19)
         await pipe.execute()
     except Exception as e:
         logger.error(f"Failed to increment metric {key}: {e}")
 
+async def track_latency(latency_ms: int):
+    """Tracks latency by keeping a sum and a count to calculate average."""
+    try:
+        pipe = _redis_client.pipeline()
+        pipe.incrby("metrics:latency_sum_ms", latency_ms)
+        pipe.incrby("metrics:latency_count", 1)
+        await pipe.execute()
+    except Exception as e:
+        logger.error(f"Failed to track latency: {e}")
 
 async def get_all_metrics() -> dict:
     """Retrieve all metrics for the dashboard."""
@@ -42,6 +53,9 @@ async def get_all_metrics() -> dict:
                 "compression_runs": 0,
                 "cost_saved_usd": 0.0,
                 "routing_efficiency_pct": 0,
+                "tokens_groq": 0,
+                "tokens_nim": 0,
+                "avg_latency_ms": 0,
                 "activity_log": [],
             }
             return base
@@ -58,6 +72,14 @@ async def get_all_metrics() -> dict:
         metrics["complex_intents_routed"] = max(0, complex_)
         metrics["cost_saved_usd"] = round((tokens_saved / 1_000_000) * 0.79, 6)
         metrics["routing_efficiency_pct"] = round((simple / requests) * 100) if requests > 0 else 0
+        
+        # Avoid KeyError for missing new metrics
+        metrics["tokens_groq"] = metrics.get("tokens_groq", 0)
+        metrics["tokens_nim"] = metrics.get("tokens_nim", 0)
+        
+        latency_sum = metrics.get("latency_sum_ms", 0)
+        latency_count = metrics.get("latency_count", 0)
+        metrics["avg_latency_ms"] = round(latency_sum / latency_count) if latency_count > 0 else 0
 
         # Fetch recent activity log
         raw_log = await _redis_client.lrange("metrics:activity_log", 0, 14)

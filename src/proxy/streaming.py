@@ -13,11 +13,12 @@ WHY THIS EXISTS:
 
 import json
 import logging
+import time
 from openai import AsyncOpenAI
 from src.config import settings
 from src.proxy.transformer import build_openai_chunk, build_openai_response
 from src.token_engine.counter import count_tokens_in_text
-from src.metrics.tracker import increment_metric
+from src.metrics.tracker import increment_metric, track_latency
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,9 @@ async def stream_provider_response(
         extra={"session_id": session_id, "model": model_name},
     )
 
+    start_time = time.time()
+    used_provider = "groq"
+
     try:
         stream = await _primary_client.chat.completions.create(
             model=model_name,
@@ -79,6 +83,7 @@ async def stream_provider_response(
                 stream=True,
             )
             model_name = fallback_model
+            used_provider = "nim"
         except Exception as fallback_e:
             logger.error(f"Fallback provider also failed: {fallback_e}")
             error_payload = {"error": {"message": "All upstream providers failed.", "type": "upstream_error"}}
@@ -106,6 +111,11 @@ async def stream_provider_response(
 
         full_output = "".join(output_text_buffer)
         output_tokens = count_tokens_in_text(full_output)
+        
+        # Track Latency and Tokens
+        latency_ms = int((time.time() - start_time) * 1000)
+        await track_latency(latency_ms)
+        await increment_metric(f"tokens_{used_provider}", output_tokens)
 
         logger.info(
             "Stream completed",
@@ -114,6 +124,8 @@ async def stream_provider_response(
                 "model": model_name,
                 "chunks_sent": chunk_count,
                 "output_tokens": output_tokens,
+                "latency_ms": latency_ms,
+                "provider": used_provider,
             },
         )
 
@@ -135,6 +147,8 @@ async def call_provider_blocking(
     Returns: (response_text, output_token_count)
     """
     logger.info("Calling provider (blocking)", extra={"session_id": session_id})
+    start_time = time.time()
+    used_provider = "groq"
 
     try:
         response = await _primary_client.chat.completions.create(
@@ -154,8 +168,13 @@ async def call_provider_blocking(
             max_tokens=max_tokens,
             stream=False,
         )
+        used_provider = "nim"
 
     response_text = response.choices[0].message.content or ""
     output_tokens = response.usage.completion_tokens if response.usage else count_tokens_in_text(response_text)
+    
+    latency_ms = int((time.time() - start_time) * 1000)
+    await track_latency(latency_ms)
+    await increment_metric(f"tokens_{used_provider}", output_tokens)
 
     return response_text, output_tokens
