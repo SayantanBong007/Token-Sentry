@@ -21,27 +21,37 @@
 
 ## 🏗️ Architecture
 
-```
-Your App / Agent
-      │
-      ▼  POST /v1/chat/completions
-┌─────────────────────────────────────────────────────┐
-│                  Token-Sentry Gateway               │
-│                                                     │
-│  1. Load Redis session history (if X-Session-ID)    │
-│  2. Recall top-5 relevant chunks from ChromaDB      │
-│  3. Count tokens (tiktoken, local — no API call)    │
-│  4. If over watermark → Compress + Save to ChromaDB │
-│  5. Classify intent → route to cheap or main model  │
-│  6. Call Primary Provider (max_retries=0)           │
-│     └─ On failure → instantly call Fallback         │
-│  7. Stream SSE response back to client              │
-│  8. Save updated history to Redis                   │
-└─────────────────────────────────────────────────────┘
-      │                    │
-      ▼                    ▼
-Primary Provider     Fallback Provider
-(e.g. Groq)         (e.g. NVIDIA NIM)
+```mermaid
+graph TD
+    Client["User / Chat App / AI Agent"] -->|"POST /v1/chat/completions"| Gateway["Token-Sentry API Gateway"]
+
+    Gateway --> SessionStore[("Redis\nSession Store")]
+    SessionStore -->|"Load History"| Gateway
+
+    Gateway --> VectorDB[("ChromaDB\nVector Store")]
+    VectorDB -->|"Recall Top-5 Chunks"| Gateway
+
+    Gateway --> TokenCounter["Tiktoken\nLocal Counter"]
+    TokenCounter -->|"Under Limit"| IntentRouter["Intent Router"]
+    TokenCounter -->|"Over Limit"| Compressor["Context Compressor"]
+
+    Compressor -->|"Archive Chunks"| VectorDB
+    Compressor -->|"Summarize"| Summarizer["Fast Model\nSummarizer"]
+    Summarizer --> IntentRouter
+
+    IntentRouter -->|"Complex Task"| LLM_Main["Primary Provider\nMain Model"]
+    IntentRouter -->|"Simple Task"| LLM_Cheap["Primary Provider\nFast Model"]
+
+    LLM_Main -->|"429 / Error"| Fallback["Fallback Provider\ne.g. NVIDIA NIM"]
+    LLM_Cheap -->|"429 / Error"| Fallback
+
+    LLM_Main --> Gateway
+    LLM_Cheap --> Gateway
+    Fallback --> Gateway
+
+    Gateway -->|"Stream SSE Response"| Client
+    Gateway -->|"Increment Counters"| Metrics[("Redis\nMetrics")]
+    Metrics -->|"GET /api/metrics"| Dashboard["Next.js\nAnalytics Dashboard"]
 ```
 
 ---
