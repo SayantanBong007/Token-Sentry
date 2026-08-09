@@ -44,7 +44,7 @@ def resolve_model(requested_model: str) -> str:
     If the client requests "gpt-4o", we return "llama-3.3-70b-versatile".
     If the model isn't in our map, we fall back to the configured default.
     """
-    resolved = MODEL_MAP.get(requested_model, settings.groq_main_model)
+    resolved = MODEL_MAP.get(requested_model, settings.primary_main_model)
 
     if resolved != requested_model:
         logger.info(f"Model mapped: '{requested_model}' → '{resolved}'")

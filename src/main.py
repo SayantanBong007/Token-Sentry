@@ -131,9 +131,9 @@ async def health_check():
         "status": "ok",
         "service": "token-sentry",
         "version": "0.2.0",
-        "backend": "groq",
+        "backend": "Universal Providers",
         "env": settings.env,
-        "model": settings.groq_main_model,
+        "model": settings.primary_main_model,
         "watermark_tokens": settings.token_high_watermark,
     })
 

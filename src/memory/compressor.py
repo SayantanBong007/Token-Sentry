@@ -112,6 +112,7 @@ async def compress_history(session_id: str, messages: list[dict]) -> list[dict]:
     
     if tokens_saved > 0:
         await increment_metric("tokens_saved", tokens_saved)
+        await increment_metric("compression_runs")
 
     logger.info(
         "Compression complete",

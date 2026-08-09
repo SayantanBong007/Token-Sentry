@@ -22,14 +22,18 @@ from src.metrics.tracker import increment_metric
 logger = logging.getLogger(__name__)
 
 # Clients for our providers
+# max_retries=0 is critical — we handle retries ourselves via the Fallback Provider.
+# Without this, the SDK waits 10+20 seconds retrying Groq before our fallback fires.
 _primary_client = AsyncOpenAI(
     base_url=settings.primary_provider_url,
-    api_key=settings.primary_api_key
+    api_key=settings.primary_api_key,
+    max_retries=0,
 )
 
 _fallback_client = AsyncOpenAI(
     base_url=settings.fallback_provider_url,
-    api_key=settings.fallback_api_key
+    api_key=settings.fallback_api_key,
+    max_retries=0,
 )
 
 async def stream_provider_response(
