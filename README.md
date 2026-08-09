@@ -130,3 +130,14 @@ You can monitor the live token savings, intent classification, and memory compre
 docker-compose logs -f app
 ```
 *(Look out for the 🔴 Watermark Breached events to see the compression in action!)*
+
+---
+
+## 🤖 AI Agent Skill (For Cursor, Antigravity, etc.)
+
+We have included an **AI Agent Skill** in this repository. You can give this skill to your AI coding assistant so that it automatically knows how to write code that integrates with Token-Sentry!
+
+To use it:
+1. Locate the `skills/token-sentry/SKILL.md` file in this repository.
+2. Copy it into your global AI customization folder (e.g. `~/.gemini/config/skills/token-sentry/SKILL.md` for Antigravity) or paste its contents into your `.cursorrules` file.
+3. Simply tell your AI: *"Write a Python script that talks to Llama-3, and route it through Token-Sentry."* — It will automatically write the correct `base_url` overrides and handle the headers for you!
