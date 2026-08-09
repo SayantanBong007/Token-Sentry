@@ -1,42 +1,20 @@
 """
-memory/compressor.py — Conversation history compression engine.
+memory/compressor.py — Summarizes old chat history into a dense JSON card.
 
 WHY THIS EXISTS:
-  When a conversation grows beyond the HIGH_WATERMARK (e.g. 4000 tokens),
-  we can't just send all of it to Groq — it would be slow, expensive, and
-  eventually hit Groq's context window limit.
+  As a conversation grows, passing 10,000+ tokens back and forth costs a lot
+  of money and eventually hits the model's context limit. 
+  
+  This compressor takes the "cold" part of the conversation (older messages)
+  and asks the AI to summarize them into a dense JSON state object:
+  {
+    "established_facts": [...],
+    "active_goals": [...],
+    "resolved_answers": {...}
+  }
 
-  Solution: COMPRESS the old part of the conversation into a compact summary,
-  then only send [summary + last few raw turns] to Groq.
-
-  THE HOT BUFFER CONCEPT:
-  ──────────────────────
-  We NEVER compress the most recent messages. Those are the "hot buffer" —
-  the part of the conversation the user is actively working in.
-
-  Example with HOT_BUFFER_TURNS = 3:
-
-    Full history (10 turns):
-    [t1][t2][t3][t4][t5][t6][t7] │ [t8][t9][t10]
-    ──────────────────────────────  ──────────────
-         COLD (compress this)           HOT (keep raw)
-
-    After compression:
-    [📋 SUMMARY CARD: t1-t7 condensed] │ [t8][t9][t10]
-
-  THE SUMMARY CARD:
-  ─────────────────
-  The compressed history becomes a single system message:
-
-    {"role": "system", "content":
-      "📋 Conversation Summary (earlier context):
-       - User introduced themselves as Sayantan, a developer in Kolkata
-       - Discussed the Token-Sentry architecture
-       - User chose Groq over Google Gemini due to quota issues
-       - Confirmed the proxy is working correctly
-       [Compression applied at 4000 tokens]"}
-
-  The AI sees this summary as context and can answer questions about earlier
+  This JSON is extremely token-efficient. We inject this summary back into
+  the system prompt. The model retains all context without needing the actual
   parts of the conversation — it just doesn't have word-for-word accuracy.
 
   WHO DOES THE COMPRESSION:
@@ -69,63 +47,57 @@ Rules:
 - Do NOT editorialize or add opinions
 - End with: [Compressed from {n} messages]
 
-Summarize this conversation:
+Output format:
+Respond ONLY with the text of the summary. Do not include introductory text.
 """
-
 
 async def compress_history(session_id: str, messages: list[dict]) -> list[dict]:
     """
-    Compress a conversation history into a [summary + hot buffer] structure.
-
-    This is the MAIN function called by the router when watermark hits RED.
-
-    Args:
-        messages: Full conversation history (all turns)
-
-    Returns:
-        Compressed list: [summary_system_message] + [last N hot turns]
-
-    Example:
-        Input:  50 messages (8000 tokens)
-        Output: 1 summary card + 3 raw turns (~500 tokens total)
+    Compresses an old conversation history to save tokens.
+    
+    1. Keeps the last N turns "hot" (uncompressed, verbatim).
+    2. Takes everything older ("cold") and summarizes it into a single system message.
+    3. Saves the original "cold" messages to the local Vector Database (Chroma) for future retrieval.
+    4. Returns [Summary System Message, ...Hot Messages].
     """
-    hot_turns = settings.hot_buffer_turns
+    hot_turns = settings.hot_buffer_turns * 2  # *2 because 1 turn = 1 user msg + 1 assistant msg
 
-    # Need at least more messages than the hot buffer to compress anything
-    if len(messages) <= hot_turns:
-        logger.info("History too short to compress — returning as-is")
+    # If the history isn't long enough to compress, do nothing
+    if len(messages) <= hot_turns + 2:
         return messages
 
-    # Split: cold history (to compress) vs hot buffer (to keep raw)
+    # Split into cold (to be summarized) and hot (to be kept raw)
     cold_messages = messages[:-hot_turns]
     hot_messages = messages[-hot_turns:]
 
+    # We need to know token counts before and after to log savings
     cold_token_count = count_tokens_in_messages(cold_messages)
     hot_token_count = count_tokens_in_messages(hot_messages)
 
     logger.info(
         "Starting compression",
         extra={
-            "cold_turns": len(cold_messages),
-            "hot_turns": len(hot_messages),
-            "cold_tokens": cold_token_count,
-            "hot_tokens": hot_token_count,
+            "session_id": session_id,
+            "cold_messages": len(cold_messages),
+            "hot_messages": len(hot_messages),
         },
     )
 
-    # Save the cold history to Vector DB before it gets summarized
+    # Save exact cold messages to VectorDB before they are lost to the summary
     await save_to_cold_memory(session_id, cold_messages)
 
-    # Generate the summary of cold history
+    # Generate the dense summary
     summary_text = await _summarize(cold_messages)
 
-    # Build the summary card (a system message at the top)
+    # Wrap the summary in a system message
     summary_card = {
         "role": "system",
         "content": (
-            f"📋 Conversation Summary (earlier context — {len(cold_messages)} messages compressed):\n"
-            f"{summary_text}"
-        ),
+            "SYSTEM MEMORY CARD (Compressed History):\n"
+            f"{summary_text}\n"
+            "(Note: Prior verbatim messages have been removed to save context space. "
+            "Rely on this memory card for past context.)"
+        )
     }
 
     # Final compressed history: summary card + hot buffer
@@ -136,6 +108,7 @@ async def compress_history(session_id: str, messages: list[dict]) -> list[dict]:
     logger.info(
         "Compression complete",
         extra={
+            "session_id": session_id,
             "before_tokens": cold_token_count + hot_token_count,
             "after_tokens": new_token_count,
             "reduction_pct": round((1 - new_token_count / (cold_token_count + hot_token_count)) * 100),
@@ -198,5 +171,4 @@ async def _summarize(messages: list[dict]) -> str:
             f"{m['role']}: {m.get('content', '')[:100]}..."
             for m in messages[-5:]
         )
-        return f"[Summary unavailable — last messages shown]\n{fallback}"
-        return f"[Summary unavailable — last messages shown]\n{fallback}"
+        return f"[Fallback Summary due to error]\n{fallback}"
