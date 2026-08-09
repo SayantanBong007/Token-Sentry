@@ -1,143 +1,287 @@
 # 🛡️ Token-Sentry
 
-**Token-Sentry** is an intelligent, high-performance, drop-in replacement API Gateway for Large Language Models (LLMs). It intercepts standard OpenAI-compatible chat requests and drastically reduces token usage and costs by providing **Infinite Context Memory** using a combination of dynamic summarization, semantic vector search, and intent-based routing.
+**Token-Sentry** is an intelligent, production-grade API gateway for Large Language Models. It sits between your application and any LLM provider, automatically compressing conversation history, routing requests to the cheapest capable model, and silently failing over to a backup provider — all while being 100% compatible with the OpenAI SDK.
 
-Built for production on a blazing-fast local stack (Groq, ChromaDB, Redis) allowing you to use Llama models with OpenAI SDK compatibility.
+> **Works with any OpenAI-compatible provider:** Groq, NVIDIA NIM, OpenRouter, Together AI, Fireworks, Anthropic (via proxy), and OpenAI itself.
 
 ---
 
 ## ✨ Features
 
-- 💸 **Token Compression (Warm Memory):** Automatically intercepts long conversations that breach a set token limit (e.g., 4000 tokens) and compresses the older context into a lightweight JSON "summary card" using a cheaper model (Llama-3.1-8b-instant).
-- 🧠 **Infinite Context (Cold Memory):** Archival memories are converted into vector embeddings and stored in a Vector Database (ChromaDB). When users ask about past topics, Token-Sentry dynamically retrieves and injects the exact memories via semantic search.
-- 🚦 **Intent-Based Routing:** Not every prompt needs an expensive model. Token-Sentry intercepts requests like "Hello" or "What's up?" and routes them to a cheap/fast model, reserving the expensive reasoning model (Llama-3.3-70b-versatile) for complex coding and logic tasks.
-- ⚡ **Zero-Latency Streaming:** Designed with true ASYNC Python and FastAPI, the proxy streams words back to the user instantly while handling complex memory management entirely in background tasks.
-- 🔌 **100% OpenAI Compatible:** Works out of the box with any existing OpenAI SDK client. Just change the `base_url` to Token-Sentry.
+| Feature | What it does |
+|---|---|
+| 🗜️ **Context Compression** | When conversation history crosses the token watermark (default: 4,000), older messages are summarized by the fast model, chunked, and stored in ChromaDB — keeping your payload small |
+| 🧠 **Infinite Vector Memory** | Archived messages are converted into vector embeddings (Sentence Transformers). On every new request, the top-5 semantically relevant chunks are recalled and injected back into context |
+| 🚦 **Intent-Based Routing** | Simple queries ("Hello", "What is 2+2?") are automatically offloaded to the cheap fast model — saving the expensive 70B model for code, reasoning, and complex tasks |
+| ⚡ **Provider Fallbacks** | If the primary provider (e.g. Groq) returns a rate-limit error, Token-Sentry catches it instantly and retries on the fallback (e.g. NVIDIA NIM) — with zero delay |
+| 📊 **Analytics Dashboard** | A live Next.js dashboard showing tokens saved, cost saved, routing breakdown, provider health, and a real-time activity feed |
+| 🔌 **OpenAI SDK Compatible** | Just change `base_url` — zero changes to your existing code |
 
 ---
 
 ## 🏗️ Architecture
 
-```mermaid
-graph TD
-    Client[User / Chat App] -->|POST /v1/chat/completions| Gateway[Token-Sentry API Gateway]
-    
-    Gateway --> TokenCounter[Tiktoken Local Counter]
-    TokenCounter -->|Under Limit| IntentRouter[Intent Router]
-    TokenCounter -->|Over Limit| Compressor[Context Compressor]
-    
-    Compressor -->|Archive| VectorDB[(ChromaDB Vector Store)]
-    Compressor -->|Summarize| Summarizer[Llama-3.1-8b-instant]
-    
-    IntentRouter -->|Complex Task| LLM_Main[Llama-3.3-70b-versatile]
-    IntentRouter -->|Simple Task| LLM_Cheap[Llama-3.1-8b-instant]
-    
-    LLM_Main --> Gateway
-    LLM_Cheap --> Gateway
-    
-    Gateway -->|Stream SSE Response| Client
+```
+Your App / Agent
+      │
+      ▼  POST /v1/chat/completions
+┌─────────────────────────────────────────────────────┐
+│                  Token-Sentry Gateway               │
+│                                                     │
+│  1. Load Redis session history (if X-Session-ID)    │
+│  2. Recall top-5 relevant chunks from ChromaDB      │
+│  3. Count tokens (tiktoken, local — no API call)    │
+│  4. If over watermark → Compress + Save to ChromaDB │
+│  5. Classify intent → route to cheap or main model  │
+│  6. Call Primary Provider (max_retries=0)           │
+│     └─ On failure → instantly call Fallback         │
+│  7. Stream SSE response back to client              │
+│  8. Save updated history to Redis                   │
+└─────────────────────────────────────────────────────┘
+      │                    │
+      ▼                    ▼
+Primary Provider     Fallback Provider
+(e.g. Groq)         (e.g. NVIDIA NIM)
 ```
 
 ---
 
 ## 🚀 Getting Started
 
-### 1. Prerequisites
-- **Docker** and **Docker Compose** installed.
-- A **Groq API Key** from [Console Groq](https://console.groq.com/keys).
+### Prerequisites
+- **Docker** and **Docker Compose**
+- A **Primary Provider API key** (e.g. Groq from [console.groq.com/keys](https://console.groq.com/keys) — free)
+- A **Fallback Provider API key** (e.g. NVIDIA NIM from [build.nvidia.com](https://build.nvidia.com) — free tier available)
 
-### 2. Installation
-Clone the repository and set up your environment variables.
+### 1. Clone & Configure
 
 ```bash
 git clone https://github.com/SayantanBong007/Token-Sentry.git
 cd Token-Sentry
-
-# Copy the example environment file
-cp .env.example .env
 ```
 
-Open `.env` and configure your keys:
+Edit `.env` with your real keys:
+
 ```env
-# Get your free key at: https://console.groq.com/keys
-GROQ_API_KEY=your-groq-api-key-here
+# ── Primary Provider (Groq) ───────────────────────────
+PRIMARY_PROVIDER_URL=https://api.groq.com/openai/v1
+PRIMARY_API_KEY=gsk_your_groq_key_here
+PRIMARY_MAIN_MODEL=llama-3.3-70b-versatile
+PRIMARY_SUMMARIZER_MODEL=llama-3.1-8b-instant
 
-# Token Watermarks
+# ── Fallback Provider (NVIDIA NIM) ────────────────────
+FALLBACK_PROVIDER_URL=https://integrate.api.nvidia.com/v1
+FALLBACK_API_KEY=nvapi-your_nvidia_key_here
+FALLBACK_MAIN_MODEL=meta/llama-3.3-70b-instruct
+FALLBACK_SUMMARIZER_MODEL=meta/llama-3.1-8b-instruct
+
+# ── Token Watermarks ──────────────────────────────────
 TOKEN_HIGH_WATERMARK=4000
-TOKEN_BUFFER=500
+HOT_BUFFER_TURNS=3
 
-# Redis Config (Session Store)
-REDIS_HOST=redis
-REDIS_PORT=6379
+# ── Redis ─────────────────────────────────────────────
+REDIS_URL=redis://redis:6379
 ```
 
-### 3. Run the Stack
-Start Token-Sentry, Redis, and the Vector Database completely locally using Docker Compose:
+### 2. Start the Stack
 
 ```bash
-docker-compose up --build -d
+docker-compose up -d --build
 ```
-The gateway is now running at `http://localhost:8000`.
+
+The gateway is now running at **`http://localhost:8000`**.
 
 ---
 
-## 💻 How to Use It (Client Side)
+## 💻 Usage
 
-Token-Sentry acts exactly like the standard OpenAI API. You do not need to rewrite your client application; simply point your OpenAI SDK to `http://localhost:8000/v1`.
+Token-Sentry is 100% compatible with the OpenAI SDK. Just change `base_url`.
 
-### Python Example
+### Python (Chat App — Stateful Memory)
+
 ```python
 from openai import OpenAI
 
-# 1. Point the client to Token-Sentry instead of OpenAI
 client = OpenAI(
     base_url="http://localhost:8000/v1",
-    api_key="not-needed" # Token-Sentry handles authentication upstream
+    api_key="not-needed"  # Token-Sentry handles auth to the upstream provider
 )
 
-# 2. Add an X-Session-ID to maintain infinite memory across calls
 response = client.chat.completions.create(
     model="llama-3.3-70b-versatile",
-    messages=[{"role": "user", "content": "Write a python script to reverse a string."}],
+    messages=[{"role": "user", "content": "Write a Python script to reverse a string."}],
     stream=True,
     extra_headers={
-        "X-Session-ID": "user-session-123"
+        "X-Session-ID": "user-session-123"  # enables infinite memory for this session
     }
 )
 
-# 3. Stream the output just like normal!
 for chunk in response:
     print(chunk.choices[0].delta.content or "", end="")
 ```
 
-### cURL Example
+### Python (AI Agent — Passthrough Mode)
+
+```python
+from openai import OpenAI
+
+# No X-Session-ID = passthrough mode
+# The agent manages its own memory. Token-Sentry only compresses if needed.
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="not-needed")
+
+response = client.chat.completions.create(
+    model="gpt-4o",  # mapped automatically → llama-3.3-70b-versatile
+    messages=[{"role": "user", "content": "Analyze this codebase..."}],
+)
+print(response.choices[0].message.content)
+```
+
+### cURL
+
 ```bash
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "X-Session-ID: my-test-session" \
   -d '{
     "model": "llama-3.3-70b-versatile",
-    "messages": [{"role": "user", "content": "Hello, how are you?"}],
-    "stream": true
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": false
   }'
 ```
 
 ---
 
-## 🗄️ Monitoring & Logs
-You can monitor the live token savings, intent classification, and memory compression by watching the Docker logs:
+## 📊 Analytics Dashboard
+
+A real-time analytics dashboard is included. Run it separately:
+
 ```bash
-docker-compose logs -f app
+cd dashboard
+npm install
+npm run dev
 ```
-*(Look out for the 🔴 Watermark Breached events to see the compression in action!)*
+
+Open **[http://localhost:3000](http://localhost:3000)** to see:
+- 🗜️ Total tokens saved & estimated cost saved
+- 📡 Total requests served & compression runs
+- 🧭 Intent routing breakdown (bar chart + efficiency ring)
+- 🔌 Provider health (Primary active, Fallback standby or triggered)
+- 📋 Live activity feed of every event in real-time
+
+Navigate to **[http://localhost:3000/docs](http://localhost:3000/docs)** for the full interactive documentation.
 
 ---
 
-## 🤖 AI Agent Skill (For Cursor, Antigravity, etc.)
+## 🌐 API Endpoints
 
-I have included an **AI Agent Skill** in this repository. You can give this skill to your AI coding assistant so that it automatically knows how to write code that integrates with Token-Sentry!
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/v1/chat/completions` | Main chat endpoint (OpenAI-compatible) |
+| `GET` | `/health` | Gateway health check + current config |
+| `GET` | `/api/metrics` | Live analytics data (JSON) |
+| `GET` | `/` | Service info |
+| `GET` | `/docs` | Auto-generated FastAPI Swagger UI |
 
-To use it:
-1. Locate the `skills/token-sentry/SKILL.md` file in this repository.
-2. Copy it into your global AI customization folder (e.g. `~/.gemini/config/skills/token-sentry/SKILL.md` for Antigravity) or paste its contents into your `.cursorrules` file.
-3. Simply tell your AI: *"Write a Python script that talks to Llama-3, and route it through Token-Sentry."* — It will automatically write the correct `base_url` overrides and handle the headers for you!
+### Special Headers
+
+| Header | Description |
+|---|---|
+| `X-Session-ID` | When present, enables **Stateful Mode** — Token-Sentry stores and compresses history in Redis. Omit for agent/passthrough mode. |
+| `X-Intent` *(response)* | `simple` or `complex` — shows which model was actually used |
+| `X-Compressed` *(response)* | `true` if the history was compressed before this request |
+
+---
+
+## 🗄️ Monitoring
+
+```bash
+# Watch live logs
+docker-compose logs -f token-sentry
+
+# Check health
+curl http://localhost:8000/health
+
+# View live metrics
+curl http://localhost:8000/api/metrics
+
+# Open RedisInsight GUI (inspect sessions, metrics, activity log)
+# http://localhost:5540
+```
+
+---
+
+## ⚙️ Configuration Reference
+
+| Variable | Default | Description |
+|---|---|---|
+| `PRIMARY_PROVIDER_URL` | — | Base URL for the primary LLM provider |
+| `PRIMARY_API_KEY` | — | API key for the primary provider |
+| `PRIMARY_MAIN_MODEL` | — | Main model for complex requests |
+| `PRIMARY_SUMMARIZER_MODEL` | — | Fast/cheap model for simple requests & compression |
+| `FALLBACK_PROVIDER_URL` | — | Base URL for the fallback provider |
+| `FALLBACK_API_KEY` | — | API key for the fallback provider |
+| `FALLBACK_MAIN_MODEL` | — | Fallback main model |
+| `TOKEN_HIGH_WATERMARK` | `4000` | Token count that triggers context compression |
+| `HOT_BUFFER_TURNS` | `3` | Recent turns kept verbatim (not compressed) |
+| `ENABLE_INTENT_ROUTING` | `true` | Enable/disable intent-based model routing |
+| `REDIS_URL` | `redis://redis:6379` | Redis connection URL |
+| `LOG_LEVEL` | `INFO` | Logging level |
+
+---
+
+## 📁 Project Structure
+
+```
+Token-Sentry/
+├── src/
+│   ├── main.py                      ← FastAPI app entry point
+│   ├── config.py                    ← Settings (reads .env)
+│   ├── proxy/
+│   │   ├── router.py                ← POST /v1/chat/completions
+│   │   ├── streaming.py             ← AsyncOpenAI clients + fallback logic
+│   │   └── transformer.py           ← Model name mapping
+│   ├── memory/
+│   │   ├── session_store.py         ← Redis session storage
+│   │   ├── compressor.py            ← Context compression engine
+│   │   └── vector_store.py          ← ChromaDB semantic chunking & retrieval
+│   ├── routing/
+│   │   └── intent_classifier.py     ← SIMPLE vs COMPLEX routing
+│   ├── token_engine/
+│   │   ├── counter.py               ← Local token counting (tiktoken)
+│   │   └── watermark.py             ← Watermark threshold detection
+│   └── metrics/
+│       └── tracker.py               ← Redis analytics engine
+│
+├── dashboard/                       ← Next.js analytics frontend
+│   └── src/app/
+│       ├── page.tsx                 ← Live metrics dashboard
+│       └── docs/page.tsx            ← Interactive documentation
+│
+├── docs/
+│   ├── day-01-playbook.md           ← Project setup walkthrough
+│   ├── day-02-playbook.md           ← Session memory & compression
+│   ├── day-03-playbook.md           ← Intent routing & cold memory
+│   └── day-04-playbook.md           ← V2: Fallbacks, chunking & dashboard
+│
+├── docker-compose.yml               ← Full stack (API + Redis + RedisInsight)
+├── Dockerfile
+└── requirements.txt
+```
+
+---
+
+## 🤖 AI Agent Skill
+
+An **AI Agent Skill** is included so your coding assistant automatically knows how to integrate with Token-Sentry.
+
+To use it, copy `skills/token-sentry/SKILL.md` into your global skills directory:
+- **Antigravity:** `~/.gemini/config/skills/token-sentry/SKILL.md`
+- **Cursor:** Paste into `.cursorrules`
+
+Then just tell your AI: *"Write a Python agent that talks to Token-Sentry"* — it will automatically write the correct `base_url`, session headers, and streaming code.
+
+---
+
+## 📜 License
+
+MIT — use it, fork it, build on it.
