@@ -25,6 +25,7 @@ WHY THIS EXISTS:
 """
 
 import logging
+import asyncio
 from openai import AsyncOpenAI
 from src.config import settings
 from src.token_engine.counter import count_tokens_in_messages
@@ -67,8 +68,10 @@ async def compress_history(session_id: str, messages: list[dict]) -> list[dict]:
     """
     hot_turns = settings.hot_buffer_turns * 2  # *2 because 1 turn = 1 user msg + 1 assistant msg
 
-    # If the history isn't long enough to compress, do nothing
+    # If the history isn't long enough to compress, check if it's a monolithic document payload
     if len(messages) <= hot_turns + 2:
+        if count_tokens_in_messages(messages) > settings.token_high_watermark:
+            return await _compress_document_payload(session_id, messages)
         return messages
 
     # Split into cold (to be summarized) and hot (to be kept raw)
@@ -182,3 +185,108 @@ async def _summarize(messages: list[dict]) -> str:
             for m in messages[-5:]
         )
         return f"[Fallback Summary due to error]\n{fallback}"
+
+async def _compress_document_payload(session_id: str, messages: list[dict]) -> list[dict]:
+    """
+    Compresses a monolithic payload (few messages, but massive token count).
+    Uses map-reduce to split the largest message into chunks, summarizes them in parallel,
+    and recombines them.
+    """
+    if not messages:
+        return messages
+
+    # Find the largest message
+    largest_idx = 0
+    max_len = 0
+    for i, msg in enumerate(messages):
+        content_len = len(msg.get("content", ""))
+        if content_len > max_len:
+            max_len = content_len
+            largest_idx = i
+
+    largest_msg = messages[largest_idx]
+    content = largest_msg.get("content", "")
+    
+    logger.info(
+        "Starting Map-Reduce Document Compression",
+        extra={
+            "session_id": session_id,
+            "largest_msg_len": len(content),
+            "total_messages": len(messages)
+        }
+    )
+    
+    # Chunking: split every 12,000 characters
+    chunk_size = 12000
+    chunks = [content[i:i+chunk_size] for i in range(0, len(content), chunk_size)]
+    
+    # Create parallel tasks for each chunk
+    tasks = []
+    for chunk in chunks:
+        tasks.append(_summarize_chunk(chunk))
+        
+    summaries = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Filter out exceptions and combine
+    valid_summaries = []
+    for s in summaries:
+        if isinstance(s, Exception):
+            logger.error(f"Chunk summarization failed: {s}")
+        else:
+            valid_summaries.append(s)
+            
+    combined_summary = "\n\n--- CHUNK SUMMARY ---\n\n".join(valid_summaries)
+    
+    new_content = (
+        "DOCUMENT MEMORY CARD (Map-Reduced):\n"
+        f"{combined_summary}\n"
+        "(Note: The original massive document was compressed to save context space.)"
+    )
+    
+    # Create new messages list with replaced content
+    compressed_messages = list(messages)
+    compressed_messages[largest_idx] = {
+        "role": largest_msg.get("role", "user"),
+        "content": new_content
+    }
+    
+    original_tokens = count_tokens_in_messages(messages)
+    new_tokens = count_tokens_in_messages(compressed_messages)
+    tokens_saved = original_tokens - new_tokens
+    
+    if tokens_saved > 0:
+        await increment_metric("tokens_saved", tokens_saved)
+        await increment_metric("compression_runs")
+        
+    logger.info(
+        "Document Compression complete",
+        extra={
+            "session_id": session_id,
+            "before_tokens": original_tokens,
+            "after_tokens": new_tokens,
+            "tokens_saved": tokens_saved,
+        }
+    )
+        
+    return compressed_messages
+
+async def _summarize_chunk(chunk_text: str) -> str:
+    """Summarizes a single chunk of a monolithic document."""
+    prompt = "Extract the core logic, facts, code snippets, and structural details from this document chunk. Be concise."
+    
+    try:
+        response = await _summarizer_client.chat.completions.create(
+            model=settings.primary_summarizer_model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"{prompt}\n\n{chunk_text}"
+                }
+            ],
+            temperature=0.2,
+            max_tokens=1024,
+        )
+        return response.choices[0].message.content or ""
+    except Exception as e:
+        logger.error(f"Chunk summarization error: {e}")
+        return f"[Chunk Error: {str(e)}]"
