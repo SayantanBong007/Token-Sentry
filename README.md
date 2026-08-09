@@ -97,7 +97,7 @@ client = OpenAI(
 
 # 2. Add an X-Session-ID to maintain infinite memory across calls
 response = client.chat.completions.create(
-    model="gemini-1.5-pro",
+    model="llama-3.3-70b-versatile",
     messages=[{"role": "user", "content": "Write a python script to reverse a string."}],
     stream=True,
     extra_headers={
@@ -116,7 +116,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "X-Session-ID: my-test-session" \
   -d '{
-    "model": "gemini-1.5-pro",
+    "model": "llama-3.3-70b-versatile",
     "messages": [{"role": "user", "content": "Hello, how are you?"}],
     "stream": true
   }'
