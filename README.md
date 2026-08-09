@@ -135,7 +135,7 @@ docker-compose logs -f app
 
 ## 🤖 AI Agent Skill (For Cursor, Antigravity, etc.)
 
-We have included an **AI Agent Skill** in this repository. You can give this skill to your AI coding assistant so that it automatically knows how to write code that integrates with Token-Sentry!
+I have included an **AI Agent Skill** in this repository. You can give this skill to your AI coding assistant so that it automatically knows how to write code that integrates with Token-Sentry!
 
 To use it:
 1. Locate the `skills/token-sentry/SKILL.md` file in this repository.
