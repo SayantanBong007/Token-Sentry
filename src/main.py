@@ -1,5 +1,5 @@
 """
-main.py — Token-Sentry entry point (Groq edition).
+main.py — Token-Sentry entry point (Universal Provider Edition).
 
 This is the file you run to start the server:
     python -m uvicorn src.main:app --reload --port 8000
@@ -102,9 +102,10 @@ app = FastAPI(
     title="Token-Sentry",
     description=(
         "An intelligent LLM proxy gateway that compresses conversation history, "
-        "routes intent, and reduces token costs — powered by Groq (Llama/Mixtral)."
+        "routes intent, and reduces token costs. Works with any OpenAI-compatible "
+        "provider: Groq, NVIDIA NIM, OpenRouter, Together AI, and more."
     ),
-    version="0.2.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 

@@ -48,18 +48,12 @@ class Settings(BaseSettings):
         description="Redis connection URL",
     )
 
-    # ── Google Cloud ───────────────────────────────────────────────────────────
-    gcp_project_id: str = Field(default="", description="GCP project ID")
-    gcp_region: str = Field(default="asia-south1", description="GCP region")
-
     # ── App ────────────────────────────────────────────────────────────────────
     env: str = Field(default="development")
     log_level: str = Field(default="INFO")
     port: int = Field(default=8000)
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
 # Single shared instance — import this everywhere

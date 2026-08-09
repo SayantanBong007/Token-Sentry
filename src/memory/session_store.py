@@ -47,24 +47,13 @@ SESSION_TTL_SECONDS = 60 * 60 * 24  # 24 hours
 # Key prefix for all session keys in Redis
 KEY_PREFIX = "session:"
 
+# Single persistent client shared across all requests (same pattern as tracker.py)
+_redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+
 
 def _make_key(session_id: str) -> str:
     """Build the Redis key for a session."""
     return f"{KEY_PREFIX}{session_id}"
-
-
-async def _get_client() -> aioredis.Redis | None:
-    """
-    Create a Redis client. Returns None if Redis is unavailable.
-    This prevents the whole proxy from crashing if Redis is down.
-    """
-    try:
-        client = aioredis.from_url(settings.redis_url, decode_responses=True)
-        await client.ping()
-        return client
-    except Exception as e:
-        logger.warning(f"Redis unavailable: {e}. Running without session memory.")
-        return None
 
 
 async def load_session(session_id: str) -> list[dict]:
@@ -81,14 +70,9 @@ async def load_session(session_id: str) -> list[dict]:
         history = await load_session("chat-abc123")
         # → [{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello!"}]
     """
-    client = await _get_client()
-    if not client:
-        return []
-
     try:
         key = _make_key(session_id)
-        raw = await client.get(key)
-        await client.aclose()
+        raw = await _redis.get(key)
 
         if raw is None:
             logger.debug(f"No session found for: {session_id} (new session)")
@@ -120,14 +104,9 @@ async def save_session(session_id: str, messages: list[dict]) -> bool:
     Returns:
         True if saved successfully, False otherwise.
     """
-    client = await _get_client()
-    if not client:
-        return False
-
     try:
         key = _make_key(session_id)
-        await client.setex(key, SESSION_TTL_SECONDS, json.dumps(messages))
-        await client.aclose()
+        await _redis.setex(key, SESSION_TTL_SECONDS, json.dumps(messages))
 
         logger.debug(
             f"Saved session",
@@ -150,14 +129,9 @@ async def clear_session(session_id: str) -> bool:
     Returns:
         True if deleted, False if not found or error.
     """
-    client = await _get_client()
-    if not client:
-        return False
-
     try:
         key = _make_key(session_id)
-        result = await client.delete(key)
-        await client.aclose()
+        result = await _redis.delete(key)
         return result > 0
 
     except Exception as e:

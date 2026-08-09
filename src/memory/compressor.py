@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 # Single client for the summarizer
 _summarizer_client = AsyncOpenAI(
     base_url=settings.primary_provider_url,
-    api_key=settings.primary_api_key
+    api_key=settings.primary_api_key,
+    max_retries=0,  # fail fast — fallback summary used if primary is rate-limited
 )
 
 # The prompt that instructs Llama to summarize the conversation

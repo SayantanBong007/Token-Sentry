@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 
 _client = AsyncOpenAI(
     base_url=settings.primary_provider_url,
-    api_key=settings.primary_api_key
+    api_key=settings.primary_api_key,
+    max_retries=0,  # instant failover — let router.py handle fallback
 )
 
 INTENT_PROMPT = """You are an intent router for an AI assistant.

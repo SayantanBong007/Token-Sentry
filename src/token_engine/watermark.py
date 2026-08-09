@@ -42,7 +42,7 @@ def check_watermark(token_count: int, session_id: str) -> str:
     Example:
         status = check_watermark(5200, "session_abc123")
         if status == WatermarkStatus.RED:
-            # trigger compression before sending to Gemini
+            # trigger compression before sending to the LLM provider
     """
     if token_count >= HIGH_WATERMARK:
         logger.warning(
