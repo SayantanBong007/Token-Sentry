@@ -1,0 +1,82 @@
+# ─────────────────────────────────────────────────────────────
+# Token-Sentry — Docker Compose (Full Stack)
+#
+# Starts TWO services with a single command:
+#   1. redis        — in-memory session storage
+#   2. token-sentry — the FastAPI proxy server
+#
+# Usage:
+#   docker compose up --build       ← first time (builds image)
+#   docker compose up               ← subsequent runs
+#   docker compose up -d            ← run in background (detached)
+#   docker compose down             ← stop everything
+#   docker compose logs -f          ← watch live logs
+#   docker compose logs token-sentry ← only app logs
+# ─────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Redis ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine          # Alpine = smallest Redis image (~30MB)
+    container_name: token-sentry-redis
+    ports:
+      - "6379:6379"                # expose to host so scripts/inspect_redis.py still works
+    volumes:
+      - redis_data:/data           # persist Redis data across restarts
+    command: redis-server --appendonly yes  # enable AOF persistence
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ── Token-Sentry ───────────────────────────────────────────
+  token-sentry:
+    build:
+      context: .                   # build from the Dockerfile in this directory
+      dockerfile: Dockerfile
+    container_name: token-sentry-app
+    ports:
+      - "8000:8000"                # expose API to host
+    env_file:
+      - .env                       # loads your GROQ_API_KEY and all settings
+    environment:
+      # Override Redis URL to use the Docker service name (not localhost)
+      # Inside Docker, containers talk to each other by service name
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./logs:/app/logs           # mount logs/ folder so you can see it on host
+      - ./src:/app/src             # mount src/ folder for hot-reloading code
+      - ./data:/app/data           # persist ChromaDB vector database
+    depends_on:
+      redis:
+        condition: service_healthy  # wait for Redis to pass health check before starting
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped
+
+  # ── RedisInsight ───────────────────────────────────────────
+  redisinsight:
+    image: redis/redisinsight:latest   # official Redis GUI by Redis Ltd
+    container_name: token-sentry-redisinsight
+    ports:
+      - "5540:5540"                    # open http://localhost:5540 in browser
+    volumes:
+      - redisinsight_data:/data        # saves your connections + settings
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+# ── Named Volumes ──────────────────────────────────────────────
+volumes:
+  redis_data:
+    # Redis data persists here even if containers are stopped/removed
+    # Deleted when you run: docker compose down -v
+  redisinsight_data:
+    # Saves RedisInsight settings and saved connections
